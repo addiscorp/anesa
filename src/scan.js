@@ -75,10 +75,14 @@ class Top {
 
 /**
  * @param {string} dir
- * @param {{depth?: number, biggest?: number, crossMounts?: boolean, concurrency?: number}} [opts]
+ * @param {{depth?: number, biggest?: number, crossMounts?: boolean, concurrency?: number, progress?: Progress}} [opts]
+ *   progress: updated as the walk goes, for a spinner to read
  * @returns {Promise<ScanResult>}
  */
+/** @typedef {{files: number, dirs: number, bytes: number}} Progress */
+
 export async function scan(dir, opts = {}) {
+  const progress = opts.progress ?? { files: 0, dirs: 0, bytes: 0 };
   const depth = opts.depth ?? 2;
   const top = opts.biggest ?? 20;
   const crossMounts = opts.crossMounts ?? false;
@@ -103,6 +107,8 @@ export async function scan(dir, opts = {}) {
   async function walk(abs, st, level, enclosing) {
     dirs++;
     let bytes = st.blocks * 512;
+    progress.dirs = dirs;
+    progress.bytes += bytes;
     /** @type {string[]} */ let entries;
     try {
       entries = await limit(() => fs.readdir(abs));
@@ -134,6 +140,8 @@ export async function scan(dir, opts = {}) {
       }
       files++;
       bytes += b;
+      progress.files = files;
+      progress.bytes += b;
       bigFiles.add({ path: p, bytes: b });
       if (children) children.push({ name, type: cst.isFile() ? 'file' : cst.isSymbolicLink() ? 'link' : 'other', bytes: b, junk: null });
     }));

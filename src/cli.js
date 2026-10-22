@@ -9,6 +9,9 @@ import { scan } from './scan.js';
 import { inside, listProcessPaths, selfAndAncestors } from './procs.js';
 import { findSystemctl, planClean, runClean } from './clean.js';
 import { count, human, parseSize } from './format.js';
+import { colorsFor, formatJson } from './color.js';
+import { logo } from './logo.js';
+import { spinner } from './spinner.js';
 
 // The package name lives in package.json only.
 const pkg = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'));
@@ -124,9 +127,13 @@ export function parseArgs(argv) {
   return o;
 }
 
-/** @param {unknown} value @param {Out} out */
-function printJson(value, out, stream = process.stdout) {
-  stream.write(JSON.stringify(value, null, out.pretty ? 2 : undefined) + '\n');
+/**
+ * JSON as zega writes it: pretty and coloured on a terminal, one compact line
+ * when piped or with --nopretty (src/color.js).
+ * @param {unknown} value @param {Out} out @param {NodeJS.WriteStream} [stream] @param {{always?: boolean}} [options]
+ */
+function printJson(value, out, stream = process.stdout, options = {}) {
+  stream.write(formatJson(value, stream, { nopretty: !out.pretty, ...options }));
 }
 
 /**
@@ -134,8 +141,9 @@ function printJson(value, out, stream = process.stdout) {
  */
 function fail(out, code, message, extra = {}) {
   if (out.human) {
-    process.stderr.write(`${NAME}: ${message}\n`);
-    if (code === 'usage') process.stderr.write(`  try: ${NAME} --human --help\n`);
+    const c = colorsFor(process.stderr);
+    process.stderr.write(`${c.red(`${NAME}:`)} ${message}\n`);
+    if (code === 'usage') process.stderr.write(c.dim(`  try: ${NAME} --human --help`) + '\n');
   } else {
     // One line on stderr, like simien's usage errors.
     printJson({ ok: false, error: { code, message, ...(code === 'usage' ? { hint: `${NAME} --help` } : {}), ...extra } }, { ...out, pretty: false }, process.stderr);
@@ -160,15 +168,22 @@ async function report(o, out) {
   const dir = o.positional[0] ?? '.';
   /** @type {string[]} */ const warnings = [];
   let result;
+  const progress = { files: 0, dirs: 0, bytes: 0 };
+  let stage = 'scanning';
+  const spin = spinner(out.human, () => stage === 'scanning'
+    ? `scanning ${dir}  ${human(progress.bytes)} · ${count(progress.files)} files · ${count(progress.dirs)} folders`
+    : 'finding processes running from inside');
   try {
-    result = await scan(dir, { depth: o.depth, biggest: o.biggest ?? 20, crossMounts: o.crossMounts });
+    result = await scan(dir, { depth: o.depth, biggest: o.biggest ?? 20, crossMounts: o.crossMounts, progress });
   } catch (e) {
+    spin.stop();
     const err = /** @type {NodeJS.ErrnoException} */ (e);
     return fail(out, 'not_a_folder', err.code === 'ENOTDIR' ? `${dir} isn't a folder` : `can't read ${dir}: ${err.message}`);
   }
   const root = result.root;
   /** @type {{pid: number, command: string, via: string, path: string, folder: string}[]} */
   let processes = [];
+  stage = 'processes';
   if (o.processes) {
     try {
       const [all, exclude] = await Promise.all([listProcessPaths(), selfAndAncestors()]);
@@ -185,6 +200,7 @@ async function report(o, out) {
     }
   }
   const tree = prune(result.tree, o.minSize);
+  spin.stop();
   const elapsedMs = Date.now() - started;
 
   if (!out.human) {
@@ -206,32 +222,35 @@ async function report(o, out) {
     return 0;
   }
 
+  const c = colorsFor(process.stdout);
   const w = (/** @type {string} */ s = '') => process.stdout.write(s + '\n');
   const rel = (/** @type {string} */ p) => path.relative(root, p) || '.';
-  w(`${root}  ${human(result.bytes)} in ${count(result.files)} files, ${count(result.dirs)} folders (${(elapsedMs / 1000).toFixed(1)} s)`);
+  // Sizes are padded before they're coloured, so columns still line up.
+  const size = (/** @type {number} */ b, pad = 0) => c.cyan(human(b).padStart(pad));
+  w(`${c.bold(root)}  ${size(result.bytes)} ${c.dim(`in ${count(result.files)} files, ${count(result.dirs)} folders (${(elapsedMs / 1000).toFixed(1)} s)`)}`);
   const kinds = Object.entries(result.junk.byKind).slice(0, 6).map(([k, b]) => `${k} ${human(b)}`).join(', ');
   w(result.junk.count
-    ? `reclaimable: ${human(result.junk.bytes)} in ${count(result.junk.count)} junk folders (${kinds}${Object.keys(result.junk.byKind).length > 6 ? ', …' : ''})`
-    : 'reclaimable: nothing that looks like build output or caches');
+    ? `${c.green('reclaimable:')} ${size(result.junk.bytes)} ${c.dim(`in ${count(result.junk.count)} junk folders (${kinds}${Object.keys(result.junk.byKind).length > 6 ? ', …' : ''})`)}`
+    : `${c.green('reclaimable:')} nothing that looks like build output or caches`);
   w();
   /** @type {Map<string, typeof processes>} */ const procsByTop = new Map();
   for (const p of processes) procsByTop.set(p.folder, [...(procsByTop.get(p.folder) ?? []), p]);
   const where = (/** @type {string} */ p) => path.relative(root, p).split(path.sep).slice(0, 3).join('/');
-  const procLine = (/** @type {(typeof processes)[number]} */ p) => `      ⚠ running: ${p.command} (pid ${p.pid}) in ${where(p.via === 'cwd' ? p.path : path.dirname(p.path))}`;
-  const tag = (/** @type {import('./scan.js').Node} */ n) => (n.junk ? `  [junk: ${n.junk}]` : '');
+  const procLine = (/** @type {(typeof processes)[number]} */ p) => c.yellow(`      ⚠ running: ${p.command} (pid ${p.pid}) in ${where(p.via === 'cwd' ? p.path : path.dirname(p.path))}`);
+  const tag = (/** @type {import('./scan.js').Node} */ n) => (n.junk ? c.dim(`  [junk: ${n.junk}]`) : '');
   /** @param {import('./scan.js').Node[]} nodes @param {string} prefix @param {number} indent */
   const walk = (nodes, prefix, indent) => {
     for (const n of nodes) {
-      w(`${' '.repeat(indent)}|---> ${human(n.bytes).padStart(5)}  ${prefix}${n.name}${n.type === 'dir' ? '' : n.type === 'link' ? ' (link)' : ''}${tag(n)}`);
+      w(`${' '.repeat(indent)}${c.dim('|--->')} ${size(n.bytes, 5)}  ${prefix}${n.name}${n.type === 'dir' ? '' : n.type === 'link' ? ' (link)' : ''}${tag(n)}`);
       if (n.children) walk(n.children, `${prefix}${n.name}/`, indent + 6);
     }
   };
   for (const n of tree) {
     if (n.type === 'dir') {
-      w(`• ${n.name}  ${human(n.bytes)}${tag(n)}`);
+      w(`• ${c.bold(n.name)}  ${size(n.bytes)}${tag(n)}`);
       if (n.children) walk(n.children, `${n.name}/`, 6);
     } else {
-      w(`• ${n.name}  ${human(n.bytes)}${n.type === 'link' ? ' (link)' : ''}`);
+      w(`• ${c.bold(n.name)}  ${size(n.bytes)}${n.type === 'link' ? ' (link)' : ''}`);
     }
     for (const p of procsByTop.get(n.name) ?? []) w(procLine(p));
     procsByTop.delete(n.name);
@@ -240,24 +259,24 @@ async function report(o, out) {
 
   if (o.biggest !== null) {
     w();
-    w(`biggest folders (anywhere below; each includes what is inside it)`);
-    for (const d of result.biggest.dirs) w(`  ${human(d.bytes).padStart(5)}  ${rel(d.path)}${d.junk ? `  [junk: ${d.junk}]` : ''}`);
-    w('biggest files');
-    for (const f of result.biggest.files) w(`  ${human(f.bytes).padStart(5)}  ${rel(f.path)}`);
+    w(`${c.bold('biggest folders')} ${c.dim('(anywhere below; each includes what is inside it)')}`);
+    for (const d of result.biggest.dirs) w(`  ${size(d.bytes, 5)}  ${rel(d.path)}${d.junk ? c.dim(`  [junk: ${d.junk}]`) : ''}`);
+    w(c.bold('biggest files'));
+    for (const f of result.biggest.files) w(`  ${size(f.bytes, 5)}  ${rel(f.path)}`);
     if (result.junk.items.length) {
-      w('biggest junk');
-      for (const j of result.junk.items) w(`  ${human(j.bytes).padStart(5)}  ${rel(j.path)}  [${j.kind}]`);
+      w(c.bold('biggest junk'));
+      for (const j of result.junk.items) w(`  ${size(j.bytes, 5)}  ${rel(j.path)}  ${c.dim(`[${j.kind}]`)}`);
     }
   }
   if (result.unreadable.count) {
     w();
-    w(`unreadable: ${count(result.unreadable.count)} folders (permission denied), not counted; first: ${result.unreadable.paths[0]}`);
+    w(`${c.yellow('unreadable:')} ${count(result.unreadable.count)} folders (permission denied), not counted; first: ${result.unreadable.paths[0]}`);
   }
   if (result.mounts.length) {
     w();
-    w(`other disks mounted inside, not walked (--all-filesystems to include): ${result.mounts.slice(0, 5).join(', ')}${result.mounts.length > 5 ? ', …' : ''}`);
+    w(`${c.dim('other disks mounted inside')}, not walked (--all-filesystems to include): ${result.mounts.slice(0, 5).join(', ')}${result.mounts.length > 5 ? ', …' : ''}`);
   }
-  for (const m of warnings) w(`warning: ${m}`);
+  for (const m of warnings) w(`${c.yellow('warning:')} ${m}`);
   return 0;
 }
 
@@ -279,14 +298,15 @@ async function clean(o, out) {
   const planned = await planClean(o.positional[0], ctx);
   const plan = planned.plan;
   if (out.human && plan) {
-    log(`clean ${plan.dir}`);
+    const c = colorsFor(process.stdout);
+    log(`${c.bold('clean')} ${plan.dir}`);
     for (const p of plan.processes) log(`  stop process: ${p.pid} ${p.command}`);
     for (const a of plan.launchAgents) log(`  unload launch agent: ${a}`);
     for (const u of plan.systemdUnits) log(`  disable systemd unit: ${u}`);
     for (const g of plan.gitRepos) log(`  prune worktrees of: ${g}`);
     log('  delete the folder');
     if (plan.systemAgents.length) {
-      log('  ✗ system launch agents point into it (need sudo, not touched):');
+      log(c.red('  ✗ system launch agents point into it (need sudo, not touched):'));
       for (const a of plan.systemAgents) log(`    ${a}`);
     }
   }
@@ -297,7 +317,7 @@ async function clean(o, out) {
     if (!process.stdin.isTTY) {
       return fail(out, 'needs_yes', `no terminal to ask in: nothing changed; run again with --yes to clean ${plan.dir}`, { plan });
     }
-    if (!out.human) process.stderr.write(JSON.stringify({ plan }, null, 2) + '\n');
+    if (!out.human) printJson({ plan }, out, process.stderr, { always: true });
     if (!(await ask('Go ahead? [y/N] '))) {
       if (out.human) log('nothing changed');
       else printJson({ ok: false, error: { code: 'declined', message: 'nothing changed' }, plan }, out, process.stderr);
@@ -323,11 +343,12 @@ export async function main(argv) {
     throw e;
   }
   if (o.command === 'help') {
-    if (out.human) process.stdout.write(HUMAN_HELP); else printJson(HELP, out);
+    // The mark only with --human on a terminal, as zega shows its own.
+    if (out.human) process.stdout.write((process.stdout.isTTY ? `\n${logo(process.stdout)}\n\n` : '') + HUMAN_HELP); else printJson(HELP, out, process.stdout, { always: true });
     return 0;
   }
   if (o.command === 'version') {
-    process.stdout.write(out.human ? `${pkg.version}\n` : JSON.stringify({ name: NAME, version: pkg.version }) + '\n');
+    if (out.human) process.stdout.write(`${pkg.version}\n`); else printJson({ name: NAME, version: pkg.version }, out);
     return 0;
   }
   return o.command === 'clean' ? clean(o, out) : report(o, out);

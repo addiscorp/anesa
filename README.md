@@ -134,6 +134,19 @@ anything above it, anyone's home folder, system folders (`/System/…`,
 `clean` deletes everything in the folder, uncommitted work and unpushed
 branches included. Commit and push first.
 
+## Output and colour
+
+The same rules as zega's CLI. JSON is the default, for agents: pretty-printed
+and coloured on a terminal (keys cyan, strings green, numbers yellow,
+punctuation dim), one compact uncoloured line when piped. `--nopretty` gives
+the compact line on a terminal too. `--human` is the one switch to readable
+text; only there does the terminal matter, for the spinner on stderr during a
+long scan, and the anesa mark on `--human --help`.
+
+Colour follows chalk's rules: `FORCE_COLOR=0` turns it off and `FORCE_COLOR=1`
+(2, 3) forces it, even into a pipe; otherwise `NO_COLOR` turns it off, and it
+needs a terminal whose `TERM` isn't `dumb`.
+
 ## Errors and exit codes
 
 Exit code is 0 or 1. Mistakes on the command line are one line of JSON on
