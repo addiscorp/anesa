@@ -26,4 +26,4 @@ jobs:
       - name: Packed CLI runs
         run: |
           npm pack --pack-destination "$RUNNER_TEMP"
-          npx --yes "$RUNNER_TEMP/anesa-$(node -p 'require("./package.json").version').tgz" --version
+          npx --yes --package "$RUNNER_TEMP/anesa-$(node -p 'require("./package.json").version').tgz" anesa --version
