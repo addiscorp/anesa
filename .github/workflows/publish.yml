@@ -1,0 +1,41 @@
+name: Publish npm
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+      - name: Verify release tag
+        run: node -e 'const p=require("./package.json"); if(p.name!=="anesa" || (process.env.GITHUB_EVENT_NAME!=="workflow_dispatch" && process.env.GITHUB_REF_NAME!==("v"+p.version))) throw Error("Tag must match the anesa package version");'
+      - run: npm install -g npm@11.16.0
+      - run: npm test
+      - run: npm pack --pack-destination "$RUNNER_TEMP"
+      - name: Smoke-test packed CLI
+        run: |
+          mkdir -p "$RUNNER_TEMP/anesa-smoke"
+          npm install --prefix "$RUNNER_TEMP/anesa-smoke" "$RUNNER_TEMP/anesa-$(node -p 'require("./package.json").version').tgz"
+          "$RUNNER_TEMP/anesa-smoke/node_modules/.bin/anesa" --version
+          "$RUNNER_TEMP/anesa-smoke/node_modules/.bin/anesa" --quiet "$GITHUB_WORKSPACE" > /dev/null
+      - name: Publish through npm trusted publisher
+        run: npm publish "$RUNNER_TEMP/anesa-$(node -p 'require("./package.json").version').tgz" --access public
