@@ -1,6 +1,6 @@
 {
   "name": "anesa",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "What takes the space, and what still runs, in a folder; and a safe clean for finished ones. macOS and Linux, zero dependencies.",
   "keywords": [
     "disk",
