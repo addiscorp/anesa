@@ -27,6 +27,13 @@ async function fromProc() {
     const pid = Number(n);
     let command = '';
     try { command = (await fs.readFile(`/proc/${n}/comm`, 'utf8')).trim(); } catch { return; }
+    // comm is the main thread's name, which a program may change (Node 24
+    // names it "MainThread"); argv[0] is what ps shows. Kernel threads have
+    // no cmdline and keep comm.
+    try {
+      const argv0 = (await fs.readFile(`/proc/${n}/cmdline`, 'utf8')).split('\0')[0];
+      if (argv0) command = path.basename(argv0);
+    } catch { /* gone, or not ours */ }
     for (const [link, via] of /** @type {const} */ ([['cwd', 'cwd'], ['exe', 'exe']])) {
       try {
         const p = (await fs.readlink(`/proc/${n}/${link}`)).replace(/ \(deleted\)$/, '');
