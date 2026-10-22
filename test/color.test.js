@@ -46,16 +46,35 @@ test('JSON is one compact line when piped, pretty on a terminal, compact there w
   }
 });
 
-test('the spinner draws only with --human on a terminal', () => {
-  const writes = [];
-  const fake = (isTTY) => ({ isTTY, columns: 80, write: (s) => { writes.push(s); return true; } });
-  spinner(false, () => 'x', /** @type {any} */ (fake(true))).stop();
-  spinner(true, () => 'x', /** @type {any} */ (fake(false))).stop();
-  assert.equal(writes.length, 0, 'nothing written without --human or without a terminal');
-  const s = spinner(true, () => 'scanning', /** @type {any} */ (fake(true)));
+test('progress: a spinner on a terminal, JSON lines when piped, nothing with --quiet', async () => {
+  /** @type {string[]} */ let writes = [];
+  const fake = (isTTY) => /** @type {any} */ ({ isTTY, columns: 80, write: (s) => { writes.push(s); return true; } });
+  const event = () => ({ stage: 'scanning', files: 3 });
+
+  spinner(false, () => 'x', event, fake(true)).stop();
+  spinner(false, () => 'x', event, fake(false), 5).stop();
+  assert.equal(writes.length, 0, '--quiet: nothing on a terminal or a pipe');
+
+  const s = spinner(true, () => 'scanning', event, fake(true));
   s.stop();
-  assert.ok(writes.some((w) => w.includes('scanning')), 'draws its text');
-  assert.ok(writes.at(-1).endsWith('\x1b[?25h'), 'clears its line and shows the cursor again');
+  assert.ok(writes.some((w) => w.includes('scanning')), 'terminal: draws its text');
+  assert.ok(writes.at(-1).endsWith('\x1b[?25h'), 'terminal: clears its line and shows the cursor again');
+
+  writes = [];
+  const piped = spinner(true, () => 'x', event, fake(false), 20);
+  await new Promise((r) => setTimeout(r, 70));
+  piped.stop();
+  const n = writes.length;
+  assert.ok(n >= 2, `piped: a line every interval (got ${n})`);
+  for (const w of writes) {
+    assert.ok(!/\x1b\[|\r/.test(w), 'piped: no escape codes or carriage returns');
+    const line = JSON.parse(w);
+    assert.equal(line.progress.stage, 'scanning');
+    assert.equal(line.progress.files, 3);
+    assert.equal(typeof line.progress.elapsedMs, 'number');
+  }
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(writes.length, n, 'piped: nothing after stop');
 });
 
 test('the mark is anesa in DOS Rebel', () => {
@@ -63,7 +82,7 @@ test('the mark is anesa in DOS Rebel', () => {
   assert.ok(LOGO.every((row) => /^[█░ ]+$/.test(row)));
 });
 
-test('piped CLI output: one JSON line, no escape codes, no spinner on stderr', async () => {
+test('piped CLI output: one JSON line, no escape codes; a quick scan adds nothing on stderr', async () => {
   const dir = await fixture('color-cli');
   try {
     const r = await runCli([dir]);
@@ -73,6 +92,7 @@ test('piped CLI output: one JSON line, no escape codes, no spinner on stderr', a
     JSON.parse(r.stdout);
     const h = await runCli(['--human', dir]);
     assert.ok(!ESC.test(h.stdout) && !ESC.test(h.stderr), 'no colour or spinner in piped --human');
+    assert.equal(r.stderr, '', 'a scan under 5 s prints no progress lines');
   } finally {
     await removeFixture(dir);
   }

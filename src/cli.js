@@ -44,6 +44,7 @@ const HELP = {
     '-y, --yes': 'clean: go ahead without asking (required when there is no terminal)',
     '--human': 'readable output for people',
     '--nopretty': 'compact JSON',
+    '--quiet': 'no progress on stderr (a spinner on a terminal, a JSON line every 5 s when piped)',
     '-V, --version': 'output the version number',
     '-h, --help': 'display help',
   },
@@ -74,6 +75,8 @@ Clean (deletes):
 Output:
   --human                  readable output for people (default: JSON)
   --nopretty               compact JSON
+  --quiet                  no progress on stderr (spinner on a terminal,
+                           a JSON progress line every 5 s when piped)
   -V, --version            output the version number
   -h, --help               display help
 `;
@@ -84,7 +87,7 @@ Output:
 export function parseArgs(argv) {
   const o = {
     command: /** @type {'report' | 'clean' | 'help' | 'version'} */ ('report'),
-    human: false, pretty: true, yes: false, processes: true, crossMounts: false,
+    human: false, pretty: true, quiet: false, yes: false, processes: true, crossMounts: false,
     depth: 2, biggest: /** @type {number | null} */ (null), minSize: 4097,
     /** @type {string[]} */ positional: [],
   };
@@ -98,6 +101,7 @@ export function parseArgs(argv) {
     switch (a) {
       case '--human': o.human = true; break;
       case '--nopretty': o.pretty = false; break;
+      case '--quiet': o.quiet = true; break;
       case '-y': case '--yes': o.yes = true; break;
       case '--no-processes': o.processes = false; break;
       case '--all-filesystems': o.crossMounts = true; break;
@@ -170,9 +174,9 @@ async function report(o, out) {
   let result;
   const progress = { files: 0, dirs: 0, bytes: 0 };
   let stage = 'scanning';
-  const spin = spinner(out.human, () => stage === 'scanning'
+  const spin = spinner(!o.quiet, () => stage === 'scanning'
     ? `scanning ${dir}  ${human(progress.bytes)} · ${count(progress.files)} files · ${count(progress.dirs)} folders`
-    : 'finding processes running from inside');
+    : 'finding processes running from inside', () => ({ stage, ...progress }));
   try {
     result = await scan(dir, { depth: o.depth, biggest: o.biggest ?? 20, crossMounts: o.crossMounts, progress });
   } catch (e) {

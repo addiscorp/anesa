@@ -1,6 +1,8 @@
-// A spinner on stderr while a long walk runs: only with --human on a
-// terminal (zega's rule: the terminal only matters inside --human), so JSON
-// and piped output never carry it. stdout stays clean either way.
+// Progress on stderr while a long walk runs; stdout stays clean either way.
+// On a terminal it's a spinner (redrawn in place). Piped, as agents run it,
+// it's one compact JSON line every few seconds instead (zega's rule for a
+// stream of events: one line each), starting only once the walk has been
+// running that long, so a quick scan prints nothing extra. --quiet: neither.
 import { colorsFor } from './color.js';
 
 const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -8,11 +10,21 @@ const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '
 /**
  * @param {boolean} enabled
  * @param {() => string} text what to show next to the spinner, read each frame
+ * @param {() => Record<string, unknown>} event what a piped progress line carries
  * @param {NodeJS.WriteStream} [stream]
+ * @param {number} [every] ms between piped progress lines
  * @returns {{stop: () => void}}
  */
-export function spinner(enabled, text, stream = process.stderr) {
-  if (!enabled || stream.isTTY !== true) return { stop() {} };
+export function spinner(enabled, text, event, stream = process.stderr, every = 5000) {
+  if (!enabled) return { stop() {} };
+  if (stream.isTTY !== true) {
+    const started = Date.now();
+    const timer = setInterval(() => {
+      stream.write(JSON.stringify({ progress: { ...event(), elapsedMs: Date.now() - started } }) + '\n');
+    }, every);
+    timer.unref();
+    return { stop() { clearInterval(timer); } };
+  }
   const c = colorsFor(stream);
   const started = Date.now();
   let frame = 0;
