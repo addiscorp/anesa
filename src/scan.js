@@ -28,12 +28,18 @@ export function junkKind(name, entries) {
 /** @param {number} n */
 function limiter(n) {
   let active = 0;
-  /** @type {(() => void)[]} */
-  const queue = [];
+  // A queue with a moving head: Array#shift is O(length) and the queue holds
+  // every entry of a big folder at once.
+  /** @type {((() => void) | undefined)[]} */
+  let queue = [];
+  let head = 0;
   const next = () => {
-    if (active >= n || queue.length === 0) return;
+    if (active >= n || head === queue.length) return;
     active++;
-    /** @type {() => void} */ (queue.shift())();
+    const job = /** @type {() => void} */ (queue[head]);
+    queue[head++] = undefined;
+    if (head > 4096 && head * 2 > queue.length) { queue = queue.slice(head); head = 0; }
+    job();
   };
   /** @template T @param {() => Promise<T>} fn @returns {Promise<T>} */
   return (fn) => new Promise((resolve, reject) => {

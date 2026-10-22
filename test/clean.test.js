@@ -107,7 +107,9 @@ test('a child that ignores TERM is killed after the wait', async () => {
   assert.equal(await exists(d), false);
 });
 
-test('prunes git worktree records of worktrees that were inside', async () => {
+const hasGit = (() => { try { execFileSync('git', ['--version']); return true; } catch { return false; } })();
+
+test('prunes git worktree records of worktrees that were inside', { skip: !hasGit && 'git not installed' }, async () => {
   const repo = await fixture('repo'); fixtures.push(repo);
   const d = await workdir();
   const git = (/** @type {string[]} */ ...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...a], { cwd: repo, encoding: 'utf8' });

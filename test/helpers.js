@@ -15,7 +15,7 @@ export async function fixture(name = 'fx') {
 
 /** Remove a fixture the way the fleet does: find -delete, never rm -rf. */
 export function removeFixture(dir) {
-  try { execFileSync('find', [dir, '-delete']); } catch { /* already gone */ }
+  try { execFileSync('find', [dir, '-delete'], { stdio: 'ignore' }); } catch { /* already gone */ }
 }
 
 /** @param {string} file @param {number} size */
