@@ -265,7 +265,10 @@ async function report(o, out) {
 function ask(question) {
   return new Promise((resolve) => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
-    rl.question(question, (a) => { rl.close(); resolve(/^y(es)?$/i.test(a.trim())); });
+    let answered = false;
+    rl.question(question, (a) => { answered = true; rl.close(); resolve(/^y(es)?$/i.test(a.trim())); });
+    // End of input (Ctrl-D) or Ctrl-C without an answer is a no.
+    rl.on('close', () => { if (!answered) { process.stderr.write('\n'); resolve(false); } });
   });
 }
 
