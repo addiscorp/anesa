@@ -1,0 +1,25 @@
+{
+  "name": "anesa",
+  "version": "0.1.0",
+  "private": true,
+  "description": "What takes the space, and what still runs, in a folder; and a safe clean for finished ones. macOS and Linux, zero dependencies.",
+  "type": "module",
+  "bin": {
+    "anesa": "bin/cli.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}
