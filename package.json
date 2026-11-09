@@ -17,7 +17,7 @@
   "homepage": "https://github.com/addiscorp/anesa",
   "bugs": "https://github.com/addiscorp/anesa/issues",
   "author": "Sami Fouad",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "anesa": "bin/cli.js"
