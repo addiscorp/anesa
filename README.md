@@ -161,3 +161,7 @@ is text.
 npm test                  # node:test, no dependencies
 npm pack && npx ./anesa-*.tgz --human
 ```
+
+## License
+
+[MIT](LICENSE)
